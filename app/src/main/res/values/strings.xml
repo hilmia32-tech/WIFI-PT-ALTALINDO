@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">Altalindo</string>
+    <string name="portal_url">https://altalindo.blogspot.com</string>
+    <string name="notification_channel_name">Verifikasi &amp; Pembaruan Altalindo</string>
+    <string name="notification_channel_description">Notifikasi verifikasi masuk dan pembaruan penting di portal Altalindo</string>
+    <string name="verification_detected_title">Verifikasi Masuk Baru!</string>
+    <string name="verification_detected_body">Ada %d verifikasi / aktivitas baru yang memerlukan perhatian Anda di Altalindo.</string>
+</resources>
