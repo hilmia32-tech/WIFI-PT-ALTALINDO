@@ -4,9 +4,12 @@ import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.example.notification.NotificationHelper
 import com.example.viewmodel.PortalViewModel
+import com.example.webview.PortalWebViewClient
 import com.example.webview.WebAppInterface
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -61,5 +64,24 @@ class ExampleRobolectricTest {
     bridge.updateBadge(0)
     ShadowLooper.runUiThreadTasksIncludingDelayedTasks()
     assertEquals(0, currentBadge)
+  }
+
+  @Test
+  fun `portal webview client intercepts whatsapp urls successfully`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val client = PortalWebViewClient(
+      context = context,
+      onLoadingStateChanged = {},
+      onErrorReceived = {},
+      onPageFinishedHook = {}
+    )
+
+    // Tautan wa.me harus dicegat dan dibuka secara eksternal (mengembalikan true)
+    assertTrue(client.handleUrl(null, "https://wa.me/6281234567890?text=Halo%20Altalindo"))
+    assertTrue(client.handleUrl(null, "https://api.whatsapp.com/send?phone=6281234567890"))
+    assertTrue(client.handleUrl(null, "whatsapp://send?phone=6281234567890"))
+
+    // Tautan portal internal altalindo tetap dimuat di dalam WebView (mengembalikan false)
+    assertFalse(client.handleUrl(null, "https://altalindo.blogspot.com/p/kontak.html"))
   }
 }

@@ -41,7 +41,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
@@ -377,7 +377,7 @@ private fun PortalTopAppBar(
         modifier = Modifier.testTag("quick_sound_test_button")
       ) {
         Icon(
-          imageVector = Icons.Default.VolumeUp,
+          imageVector = Icons.AutoMirrored.Filled.VolumeUp,
           contentDescription = "Uji Suara & Notifikasi",
           tint = GoldAmber
         )
@@ -488,7 +488,8 @@ private fun PortalWebView(
         settings.apply {
           javaScriptEnabled = true
           domStorageEnabled = true
-          databaseEnabled = true
+          setSupportMultipleWindows(true)
+          javaScriptCanOpenWindowsAutomatically = true
           loadWithOverviewMode = true
           useWideViewPort = true
           builtInZoomControls = true
@@ -504,8 +505,8 @@ private fun PortalWebView(
         addJavascriptInterface(webAppInterface, "AndroidBridge")
         addJavascriptInterface(webAppInterface, "AndroidNotificationBridge")
 
-        // Attach custom clients
-        webViewClient = PortalWebViewClient(
+        // Attach custom clients with WhatsApp external URL support
+        val customClient = PortalWebViewClient(
           context = ctx,
           onLoadingStateChanged = { loading ->
             viewModel.setLoading(loading)
@@ -518,6 +519,7 @@ private fun PortalWebView(
             viewModel.setNavigationState(canGoBack(), canGoForward())
           }
         )
+        webViewClient = customClient
 
         webChromeClient = PortalWebChromeClient(
           onProgressChangedCallback = { progress ->
@@ -525,6 +527,9 @@ private fun PortalWebView(
           },
           onTitleReceivedCallback = { title ->
             viewModel.setTitle(title)
+          },
+          onExternalUrlHandler = { targetUrl ->
+            customClient.handleUrl(this, targetUrl)
           }
         )
 
@@ -690,7 +695,7 @@ private fun VerificationDetailsSheet(
           .fillMaxWidth()
           .testTag("test_verification_button")
       ) {
-        Icon(imageVector = Icons.Default.VolumeUp, contentDescription = null, modifier = Modifier.size(18.dp))
+        Icon(imageVector = Icons.AutoMirrored.Filled.VolumeUp, contentDescription = null, modifier = Modifier.size(18.dp))
         Spacer(modifier = Modifier.width(8.dp))
         Text("Uji Suara & Notifikasi (Ada 1 Pembayaran)", fontSize = 14.sp)
       }

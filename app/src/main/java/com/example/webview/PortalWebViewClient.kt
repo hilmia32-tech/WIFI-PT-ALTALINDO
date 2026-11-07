@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
+import android.util.Log
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
@@ -16,10 +17,14 @@ class PortalWebViewClient(
   private val onPageFinishedHook: (url: String?) -> Unit
 ) : WebViewClient() {
 
+  companion object {
+    private const val TAG = "PortalWebViewClient"
+  }
+
   override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
     super.onPageStarted(view, url, favicon)
     onLoadingStateChanged(true)
-    onErrorReceived(null) // clear previous errors
+    onErrorReceived(null)
   }
 
   override fun onPageFinished(view: WebView?, url: String?) {
@@ -27,10 +32,7 @@ class PortalWebViewClient(
     onLoadingStateChanged(false)
 
     // Inject automated 10-second verification checker script
-    view?.evaluateJavascript(PortalScriptHelper.getAutoCheckScript()) { result ->
-      // Script injected successfully
-    }
-
+    view?.evaluateJavascript(PortalScriptHelper.getAutoCheckScript()) { _ -> }
     onPageFinishedHook(url)
   }
 
@@ -49,20 +51,98 @@ class PortalWebViewClient(
 
   override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
     val url = request?.url?.toString() ?: return false
-    val scheme = request.url.scheme?.lowercase()
+    return handleUrl(view, url)
+  }
 
-    // Handle special intents like tel:, mailto:, whatsapp:, etc.
+  @Deprecated("Deprecated in Java")
+  override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
+    if (url.isNullOrBlank()) return false
+    return handleUrl(view, url)
+  }
+
+  /**
+   * Mendeteksi tautan WhatsApp (wa.me, api.whatsapp.com, whatsapp://) dan URL eksternal
+   * agar dialihkan langsung ke aplikasi WhatsApp atau browser eksternal.
+   */
+  fun handleUrl(view: WebView?, url: String): Boolean {
+    Log.d(TAG, "Mengecek URL: $url")
+    val uri = try {
+      Uri.parse(url)
+    } catch (_: Exception) {
+      return false
+    }
+
+    val scheme = uri.scheme?.lowercase().orEmpty()
+    val host = uri.host?.lowercase().orEmpty()
+
+    // 1. Deteksi tautan WhatsApp: wa.me, api.whatsapp.com, whatsapp.com/send, atau skema whatsapp://
+    val isWhatsApp = scheme == "whatsapp" ||
+        host.contains("wa.me") ||
+        host.contains("api.whatsapp.com") ||
+        url.contains("whatsapp.com/send") ||
+        url.contains("whatsapp://")
+
+    if (isWhatsApp) {
+      Log.d(TAG, "Tautan WhatsApp terdeteksi: $url")
+      val waIntent = Intent(Intent.ACTION_VIEW, uri).apply {
+        flags = Intent.FLAG_ACTIVITY_NEW_TASK
+      }
+
+      try {
+        // Coba buka langsung ke WhatsApp (atau WhatsApp Business)
+        context.startActivity(waIntent)
+        return true
+      } catch (e: Exception) {
+        Log.w(TAG, "Gagal membuka WhatsApp via intent langsung, fallback ke browser: ${e.message}")
+        try {
+          val webIntent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+          }
+          context.startActivity(webIntent)
+          return true
+        } catch (ex: Exception) {
+          Log.e(TAG, "Gagal membuka tautan WhatsApp: ${ex.message}")
+          return true
+        }
+      }
+    }
+
+    // 2. Skema non-HTTP seperti tel:, mailto:, sms:, market:, intent:
     if (scheme != "http" && scheme != "https") {
       try {
-        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-        context.startActivity(intent)
-        return true
-      } catch (_: Exception) {
+        if (scheme == "intent") {
+          val parsedIntent = Intent.parseUri(url, Intent.URI_INTENT_SCHEME).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+          }
+          context.startActivity(parsedIntent)
+          return true
+        } else {
+          val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+          }
+          context.startActivity(intent)
+          return true
+        }
+      } catch (e: Exception) {
+        Log.w(TAG, "Gagal menangani skema non-http: ${e.message}")
         return true
       }
     }
 
-    // Load web URLs inside this WebView directly
+    // 3. Tautan eksternal medsos (Telegram, Instagram) buka di aplikasi eksternal
+    if (host.contains("t.me") || host.contains("telegram.me") || host.contains("instagram.com")) {
+      try {
+        val extIntent = Intent(Intent.ACTION_VIEW, uri).apply {
+          flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+        context.startActivity(extIntent)
+        return true
+      } catch (_: Exception) {
+        return false
+      }
+    }
+
+    // URL situs Altalindo tetap dimuat di dalam WebView
     return false
   }
 }
