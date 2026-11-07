@@ -22,7 +22,7 @@ object NotificationHelper {
   const val CHANNEL_ID = "altalindo_pembayaran_channel_v1"
   private const val CHANNEL_NAME = "Verifikasi Pembayaran Altalindo"
   private const val CHANNEL_DESCRIPTION = "Notifikasi suara dan getar untuk verifikasi pembayaran masuk"
-  private const val NOTIFICATION_ID = 2024
+  const val NOTIFICATION_ID = 2024
 
   fun createNotificationChannel(context: Context) {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -47,18 +47,37 @@ object NotificationHelper {
   }
 
   /**
-   * Triggers local system notification, audible phone ringtone sound, and physical vibration.
+   * Menghapus notifikasi dari bilah status di atas layar HP ketika pembayaran sudah 0 / kosong.
+   */
+  fun clearNotification(context: Context) {
+    Log.d("NotificationHelper", "clearNotification: menghapus notifikasi di bilah atas layar")
+    try {
+      val notificationManager = NotificationManagerCompat.from(context)
+      notificationManager.cancel(NOTIFICATION_ID)
+      notificationManager.cancelAll()
+    } catch (e: Exception) {
+      Log.e("NotificationHelper", "Gagal menghapus notifikasi: ${e.message}")
+    }
+  }
+
+  /**
+   * Memicu notifikasi lokal, suara dering HP, dan getaran saat ada pembayaran menunggu verifikasi.
    */
   fun showLocalNotification(
     context: Context,
     message: String,
     count: Int = 1
   ) {
+    if (count <= 0) {
+      clearNotification(context)
+      return
+    }
+
     Log.d("NotificationHelper", "showLocalNotification: $message (count=$count)")
 
     createNotificationChannel(context)
 
-    // 1. Play audible ringtone sound directly so the phone is guaranteed to ring
+    // 1. Bunyikan nada dering notifikasi
     try {
       val soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
         ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
@@ -68,7 +87,7 @@ object NotificationHelper {
       Log.e("NotificationHelper", "Error playing sound: ${e.message}")
     }
 
-    // 2. Trigger phone vibration
+    // 2. Aktifkan getaran HP
     try {
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
         val vibratorManager = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
@@ -89,7 +108,7 @@ object NotificationHelper {
       Log.e("NotificationHelper", "Error vibrating: ${e.message}")
     }
 
-    // 3. Build and display system heads-up notification
+    // 3. Tampilkan Heads-up Notification di layar atas
     val intent = Intent(context, MainActivity::class.java).apply {
       flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
       putExtra("EXTRA_SOURCE", "NOTIFICATION_VERIF")

@@ -26,21 +26,30 @@ class WebAppInterface(
 
   @JavascriptInterface
   fun updateBadge(count: Int) {
-    Log.d(TAG, "updateBadge dipanggil dengan count=$count")
+    Log.d(TAG, "updateBadge dipanggil secara dinamis dengan count=$count")
     mainHandler.post {
-      onBadgeChanged(count.coerceAtLeast(0))
-      // Di sinilah logika notifikasi sistem Android, suara, dan badge merah dijalankan
-      if (count > 0) {
-        // Memicu notifikasi lokal & suara di HP Android
-        showLocalNotification("Ada $count pembayaran menunggu verifikasi!")
-        onVerificationReceived(count, "Verifikasi Pembayaran", "Ada $count pembayaran menunggu verifikasi!")
+      val safeCount = count.coerceAtLeast(0)
+      // Selalu perbarui badge dan state aplikasi secara dinamis
+      onBadgeChanged(safeCount)
+
+      if (safeCount == 0) {
+        // Nilai 0: Hapus notifikasi dari bilah atas layar secara bersih
+        NotificationHelper.clearNotification(context)
+        onVerificationReceived(0, "Verifikasi Pembayaran", "Tidak ada pembayaran menunggu verifikasi.")
+        Log.d(TAG, "Notifikasi dibersihkan karena pendingCount bernilai 0.")
+      } else {
+        // Nilai > 0: Tampilkan notifikasi dan bunyikan suara HP
+        val msg = "Ada $safeCount pembayaran menunggu verifikasi!"
+        NotificationHelper.showLocalNotification(context, msg, safeCount)
+        onVerificationReceived(safeCount, "Verifikasi Pembayaran", msg)
+        Log.d(TAG, "Notifikasi dimunculkan: $msg")
       }
     }
   }
 
   @JavascriptInterface
   fun updateBadge(countStr: String) {
-    val count = countStr.trim().toIntOrNull() ?: 1
+    val count = countStr.trim().toIntOrNull() ?: 0
     updateBadge(count)
   }
 
@@ -56,22 +65,30 @@ class WebAppInterface(
   @JavascriptInterface
   fun onNewVerification(count: Int, title: String?, message: String?) {
     mainHandler.post {
-      val safeCount = if (count <= 0) 1 else count
-      val msg = message?.takeIf { it.isNotBlank() } ?: "Ada $safeCount pembayaran menunggu verifikasi!"
+      val safeCount = count.coerceAtLeast(0)
       onBadgeChanged(safeCount)
-      onVerificationReceived(safeCount, title ?: "Verifikasi Pembayaran", msg)
-      NotificationHelper.showLocalNotification(context, msg, safeCount)
+      if (safeCount == 0) {
+        NotificationHelper.clearNotification(context)
+        onVerificationReceived(0, "Verifikasi Pembayaran", "Tidak ada pembayaran menunggu verifikasi.")
+      } else {
+        val msg = message?.takeIf { it.isNotBlank() } ?: "Ada $safeCount pembayaran menunggu verifikasi!"
+        onVerificationReceived(safeCount, title ?: "Verifikasi Pembayaran", msg)
+        NotificationHelper.showLocalNotification(context, msg, safeCount)
+      }
     }
   }
 
   @JavascriptInterface
   fun onVerificationCheckResult(count: Int, details: String?) {
     mainHandler.post {
-      if (count > 0) {
-        val msg = details?.takeIf { it.isNotBlank() } ?: "Ada $count pembayaran menunggu verifikasi!"
-        onBadgeChanged(count)
-        onVerificationReceived(count, "Verifikasi Pembayaran", msg)
-        NotificationHelper.showLocalNotification(context, msg, count)
+      val safeCount = count.coerceAtLeast(0)
+      onBadgeChanged(safeCount)
+      if (safeCount == 0) {
+        NotificationHelper.clearNotification(context)
+      } else {
+        val msg = details?.takeIf { it.isNotBlank() } ?: "Ada $safeCount pembayaran menunggu verifikasi!"
+        onVerificationReceived(safeCount, "Verifikasi Pembayaran", msg)
+        NotificationHelper.showLocalNotification(context, msg, safeCount)
       }
     }
   }

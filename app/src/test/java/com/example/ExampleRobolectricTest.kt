@@ -11,6 +11,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import org.robolectric.shadows.ShadowLooper
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -41,19 +42,24 @@ class ExampleRobolectricTest {
   }
 
   @Test
-  fun `webAppInterface triggers badge update and notification`() {
+  fun `webAppInterface dynamic sync resets to 0 when pendingCount is 0`() {
     val context = ApplicationProvider.getApplicationContext<Context>()
-    var updatedBadgeCount = -1
+    var currentBadge = -1
     val bridge = WebAppInterface(
       context = context,
       onBadgeChanged = { count ->
-        updatedBadgeCount = count
+        currentBadge = count
       }
     )
 
+    // Simulasi ada 2 pembayaran
     bridge.updateBadge(2)
-    // Runs on main handler
-    org.robolectric.shadows.ShadowLooper.runUiThreadTasksIncludingDelayedTasks()
-    assertEquals(2, updatedBadgeCount)
+    ShadowLooper.runUiThreadTasksIncludingDelayedTasks()
+    assertEquals(2, currentBadge)
+
+    // Simulasi saat tabel konfirmasi sudah kosong (pendingCount bernilai 0)
+    bridge.updateBadge(0)
+    ShadowLooper.runUiThreadTasksIncludingDelayedTasks()
+    assertEquals(0, currentBadge)
   }
 }

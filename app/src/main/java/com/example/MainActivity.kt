@@ -20,12 +20,18 @@ class MainActivity : ComponentActivity() {
   private val portalViewModel: PortalViewModel by viewModels()
 
   /**
-   * Memicu notifikasi lokal, suara dering HP, dan getaran untuk pembayaran menunggu verifikasi.
+   * Memicu notifikasi lokal secara dinamis.
+   * Jika count == 0, notifikasi di bilah atas layar langsung dihapus bersih.
    */
   fun showLocalNotification(message: String, count: Int = 1) {
-    NotificationHelper.showLocalNotification(this, message, count)
-    portalViewModel.onBadgeUpdated(count)
-    portalViewModel.onVerificationDetected(count, "Verifikasi Pembayaran", message)
+    if (count <= 0) {
+      NotificationHelper.clearNotification(this)
+      portalViewModel.onBadgeUpdated(0)
+    } else {
+      NotificationHelper.showLocalNotification(this, message, count)
+      portalViewModel.onBadgeUpdated(count)
+      portalViewModel.onVerificationDetected(count, "Verifikasi Pembayaran", message)
+    }
   }
 
   override fun onCreate(savedInstanceState: Bundle?) {
@@ -60,8 +66,9 @@ class MainActivity : ComponentActivity() {
   private fun handleNotificationIntent(intent: Intent?) {
     if (intent?.getStringExtra("EXTRA_SOURCE") == "NOTIFICATION_VERIF") {
       val count = intent.getIntExtra("EXTRA_COUNT", 0)
-      if (count > 0) {
-        portalViewModel.onBadgeUpdated(count)
+      portalViewModel.onBadgeUpdated(count)
+      if (count <= 0) {
+        NotificationHelper.clearNotification(this)
       }
     }
   }
