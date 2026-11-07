@@ -1,5 +1,6 @@
 package com.example.notification
 
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -19,10 +20,16 @@ import com.example.R
 
 object NotificationHelper {
 
+  // Channel untuk notifikasi peringatan pembayaran (High Priority dengan Dering & Getar)
   const val CHANNEL_ID = "altalindo_pembayaran_channel_v1"
   private const val CHANNEL_NAME = "Verifikasi Pembayaran Altalindo"
   private const val CHANNEL_DESCRIPTION = "Notifikasi suara dan getar untuk verifikasi pembayaran masuk"
   const val NOTIFICATION_ID = 2024
+
+  // Channel untuk Foreground Service (Low Priority / silent agar tidak mengganggu)
+  const val SERVICE_CHANNEL_ID = "altalindo_service_channel_v1"
+  private const val SERVICE_CHANNEL_NAME = "Layanan Pemantau Latar Belakang"
+  const val SERVICE_NOTIFICATION_ID = 2025
 
   fun createNotificationChannel(context: Context) {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -46,6 +53,51 @@ object NotificationHelper {
     }
   }
 
+  fun createServiceNotificationChannel(context: Context) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+      val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+      val channel = NotificationChannel(
+        SERVICE_CHANNEL_ID,
+        SERVICE_CHANNEL_NAME,
+        NotificationManager.IMPORTANCE_LOW
+      ).apply {
+        description = "Memastikan pengecekan verifikasi tetap berjalan saat aplikasi ditutup total"
+        setShowBadge(false)
+      }
+      notificationManager.createNotificationChannel(channel)
+    }
+  }
+
+  /**
+   * Notifikasi permanen Foreground Service agar layanan tidak dimatikan Android saat app ditutup.
+   */
+  fun buildForegroundServiceNotification(
+    context: Context,
+    statusText: String = "Memantau verifikasi & pembayaran masuk berkala (10s)"
+  ): Notification {
+    createServiceNotificationChannel(context)
+
+    val intent = Intent(context, MainActivity::class.java).apply {
+      flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+    }
+
+    val pendingIntent = PendingIntent.getActivity(
+      context,
+      0,
+      intent,
+      PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+    )
+
+    return NotificationCompat.Builder(context, SERVICE_CHANNEL_ID)
+      .setSmallIcon(R.mipmap.ic_launcher)
+      .setContentTitle("Altalindo Pemantau Aktif")
+      .setContentText(statusText)
+      .setPriority(NotificationCompat.PRIORITY_LOW)
+      .setOngoing(true)
+      .setContentIntent(pendingIntent)
+      .build()
+  }
+
   /**
    * Menghapus notifikasi dari bilah status di atas layar HP ketika pembayaran sudah 0 / kosong.
    */
@@ -54,7 +106,6 @@ object NotificationHelper {
     try {
       val notificationManager = NotificationManagerCompat.from(context)
       notificationManager.cancel(NOTIFICATION_ID)
-      notificationManager.cancelAll()
     } catch (e: Exception) {
       Log.e("NotificationHelper", "Gagal menghapus notifikasi: ${e.message}")
     }

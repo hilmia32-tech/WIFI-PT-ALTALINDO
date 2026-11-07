@@ -3,6 +3,7 @@ package com.example
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.example.notification.NotificationHelper
+import com.example.service.AltalindoBackgroundService
 import com.example.viewmodel.PortalViewModel
 import com.example.webview.PortalWebViewClient
 import com.example.webview.WebAppInterface
@@ -83,5 +84,13 @@ class ExampleRobolectricTest {
 
     // Tautan portal internal altalindo tetap dimuat di dalam WebView (mengembalikan false)
     assertFalse(client.handleUrl(null, "https://altalindo.blogspot.com/p/kontak.html"))
+  }
+
+  @Test
+  fun `foreground service notification builds successfully`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    NotificationHelper.createServiceNotificationChannel(context)
+    val notif = NotificationHelper.buildForegroundServiceNotification(context)
+    assertNotNull(notif)
   }
 }

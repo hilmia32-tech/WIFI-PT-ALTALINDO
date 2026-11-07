@@ -40,6 +40,10 @@ class MainActivity : ComponentActivity() {
 
     // Inisialisasi Notification Channel sistem Android
     NotificationHelper.createNotificationChannel(this)
+    NotificationHelper.createServiceNotificationChannel(this)
+
+    // Mulai Foreground Service pemantauan latar belakang saat app ditutup total
+    com.example.service.AltalindoBackgroundService.startService(this)
 
     // Handle intent extras jika dibuka dari ketukan notifikasi
     handleNotificationIntent(intent)
