@@ -3,9 +3,9 @@ package com.example.webview
 object PortalScriptHelper {
 
   /**
-   * The JavaScript code injected into the page once loaded.
-   * Sets up global helper hooks and starts a 10-second interval timer
-   * to automatically check for incoming verification items.
+   * Script otomatis yang diinjeksikan ke dalam WebView portal Altalindo.
+   * Melakukan scan setiap 10 detik untuk mendeteksi status pembayaran / verifikasi masuk,
+   * lalu memanggil interface AndroidBridge.updateBadge(count).
    */
   fun getAutoCheckScript(): String {
     return """
@@ -15,40 +15,38 @@ object PortalScriptHelper {
         }
         window.__altalindoScriptInitialized = true;
         
-        console.log("[Altalindo] Script auto-deteksi verifikasi 10 detik diaktifkan.");
+        console.log("[Altalindo] Skrip pemantau verifikasi pembayaran 10 detik aktif.");
 
-        // Define global helper object for web developers / template code
+        // Hook pembantu global agar dapat dipanggil langsung dari skrip blogger / admin
         window.AltalindoApp = {
-          triggerVerification: function(count, title, msg) {
-            count = count || 1;
-            title = title || "Verifikasi Masuk Baru!";
-            msg = msg || "Ada " + count + " verifikasi baru masuk di portal Altalindo.";
-            if (window.AndroidNotificationBridge) {
-              window.AndroidNotificationBridge.onNewVerification(count, title, msg);
-            }
-          },
-          updateBadge: function(count) {
-            if (window.AndroidNotificationBridge) {
+          triggerVerification: function(count, message) {
+            count = parseInt(count, 10) || 1;
+            if (window.AndroidBridge && typeof window.AndroidBridge.updateBadge === 'function') {
+              window.AndroidBridge.updateBadge(count);
+            } else if (window.AndroidNotificationBridge) {
               window.AndroidNotificationBridge.updateBadge(count);
             }
+          },
+          notifyPayment: function(count) {
+            this.triggerVerification(count || 1);
           },
           checkNow: function() {
             window.__altalindoCheckVerification();
           }
         };
 
-        // Verification inspection algorithm
+        // Algoritma pendeteksi verifikasi pembayaran masuk
         window.__altalindoCheckVerification = function() {
           try {
             var count = 0;
             var details = [];
-            var foundTexts = [];
 
-            // 1. Check badge or notification counter elements
+            // 1. Periksa elemen badge / counter angka
             var badgeSelectors = [
               '.badge', '.notif-badge', '.notification-badge', '.notification-count',
               '.verif-count', '.verifikasi-count', '[data-badge]', '[data-notification]',
-              '.pending-verification', '.badge-danger', '.badge-warning', '.alert-count'
+              '.pending-verification', '.badge-danger', '.badge-warning', '.alert-count',
+              '.payment-pending', '.count-pembayaran'
             ];
 
             var badgeEls = document.querySelectorAll(badgeSelectors.join(','));
@@ -62,73 +60,71 @@ object PortalScriptHelper {
               }
             }
 
-            // 2. Search for verification phrases in text nodes
-            var verifRegex = /(verifikasi|verification|perlu\s+verifikasi|menunggu\s+verifikasi|verifikasi\s+masuk|permintaan\s+verifikasi|antrean\s+verifikasi)/i;
-            var allElements = document.querySelectorAll('div, span, p, a, h3, h4, li, strong, b');
-            
-            for (var j = 0; j < allElements.length && foundTexts.length < 3; j++) {
-              var node = allElements[j];
-              // Check if node is leaf or near-leaf to avoid matching huge parent containers
-              if (node.children.length <= 1) {
-                var text = (node.innerText || node.textContent || '').trim();
-                if (text && verifRegex.test(text) && text.length > 3 && text.length < 120) {
-                  // Ignore common menu/static footer links if not active/alert
-                  foundTexts.push(text);
+            // 2. Periksa teks verifikasi pembayaran dalam elemen halaman
+            var paymentRegex = /(pembayaran|verifikasi|menunggu\s+verifikasi|bukti\s+transfer|konfirmasi\s+pembayaran|transaksi\s+baru|pesanan\s+baru|unverified)/i;
+            var textElements = document.querySelectorAll('div, span, p, a, h3, h4, li, strong, b, td');
+            var foundItems = [];
+
+            for (var j = 0; j < textElements.length && foundItems.length < 5; j++) {
+              var node = textElements[j];
+              if (node.children.length === 0) {
+                var content = (node.innerText || node.textContent || '').trim();
+                if (content && paymentRegex.test(content) && content.length > 3 && content.length < 100) {
+                  // Periksa apakah ini status aktif seperti 'menunggu verifikasi' atau ada angka
+                  if (/menunggu|pending|belum\s+diverifikasi|verifikasi\s+masuk|bukti\s+transfer/i.test(content)) {
+                    foundItems.push(content);
+                  }
                 }
               }
             }
 
-            // 3. Custom developer variable check
+            // Jika ada status menunggu verifikasi ditemukan
+            if (count === 0 && foundItems.length > 0) {
+              count = foundItems.length;
+            }
+
+            // 3. Periksa variabel JavaScript global jika webmaster mengesetnya
+            if (typeof window.pendingPayments === 'number' && window.pendingPayments > 0) {
+              count = Math.max(count, window.pendingPayments);
+            }
             if (typeof window.pendingVerifications === 'number' && window.pendingVerifications > 0) {
               count = Math.max(count, window.pendingVerifications);
             }
-            if (typeof window.altalindoVerificationCount === 'number' && window.altalindoVerificationCount > 0) {
-              count = Math.max(count, window.altalindoVerificationCount);
+
+            // Laporkan ke AndroidBridge
+            if (count > 0) {
+              if (window.AndroidBridge && typeof window.AndroidBridge.updateBadge === 'function') {
+                window.AndroidBridge.updateBadge(count);
+              } else if (window.AndroidNotificationBridge) {
+                window.AndroidNotificationBridge.updateBadge(count);
+              }
             }
 
-            // Combine details
-            var summary = details.join(', ');
-            if (foundTexts.length > 0) {
-              summary += (summary ? " | " : "") + foundTexts.join('; ');
-            }
-
-            // Report to Android Bridge
-            if (window.AndroidNotificationBridge) {
-              window.AndroidNotificationBridge.onVerificationCheckResult(count, summary);
-            }
-
-            return JSON.stringify({
-              count: count,
-              summary: summary,
-              timestamp: new Date().toLocaleTimeString()
-            });
+            return JSON.stringify({ count: count, items: foundItems });
           } catch(err) {
-            if (window.AndroidNotificationBridge) {
-              window.AndroidNotificationBridge.log("Error cek verifikasi: " + err.message);
-            }
+            console.error("[Altalindo] Cek verifikasi error:", err);
             return JSON.stringify({ error: err.message });
           }
         };
 
-        // Run immediately after injection
+        // Jalankan pengecekan pertama setelah jeda singkat
         setTimeout(function() {
           window.__altalindoCheckVerification();
         }, 1500);
 
-        // Schedule periodic check every 10 seconds (10,000 milliseconds)
+        // Pasang interval otomatis setiap 10 DETIK (10000 ms)
+        if (window.__altalindoIntervalId) {
+          clearInterval(window.__altalindoIntervalId);
+        }
         window.__altalindoIntervalId = setInterval(function() {
           window.__altalindoCheckVerification();
         }, 10000);
 
-        return "INITIALIZED_EVERY_10_SECONDS";
+        return "INITIALIZED_10_SECONDS";
       })();
     """.trimIndent()
   }
 
-  /**
-   * One-shot evaluation script executed every 10 seconds from Kotlin
-   * as a backup to guarantee execution even across DOM modifications.
-   */
   fun getPeriodicCheckScript(): String {
     return """
       (function() {

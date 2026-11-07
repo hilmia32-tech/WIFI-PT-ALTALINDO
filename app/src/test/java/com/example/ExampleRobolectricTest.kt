@@ -4,7 +4,7 @@ import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.example.notification.NotificationHelper
 import com.example.viewmodel.PortalViewModel
-import com.example.webview.WebAppNotificationBridge
+import com.example.webview.WebAppInterface
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Test
@@ -41,13 +41,19 @@ class ExampleRobolectricTest {
   }
 
   @Test
-  fun `bridge reports 10-second check interval`() {
+  fun `webAppInterface triggers badge update and notification`() {
     val context = ApplicationProvider.getApplicationContext<Context>()
-    val bridge = WebAppNotificationBridge(
+    var updatedBadgeCount = -1
+    val bridge = WebAppInterface(
       context = context,
-      onVerificationDetected = { _, _, _ -> },
-      onBadgeUpdated = { _ -> }
+      onBadgeChanged = { count ->
+        updatedBadgeCount = count
+      }
     )
-    assertEquals(10, bridge.getCheckIntervalSeconds())
+
+    bridge.updateBadge(2)
+    // Runs on main handler
+    org.robolectric.shadows.ShadowLooper.runUiThreadTasksIncludingDelayedTasks()
+    assertEquals(2, updatedBadgeCount)
   }
 }

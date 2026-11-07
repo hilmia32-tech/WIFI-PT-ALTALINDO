@@ -1,7 +1,9 @@
 package com.example
 
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.webkit.JavascriptInterface
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -17,20 +19,32 @@ class MainActivity : ComponentActivity() {
 
   private val portalViewModel: PortalViewModel by viewModels()
 
+  /**
+   * Memicu notifikasi lokal, suara dering HP, dan getaran untuk pembayaran menunggu verifikasi.
+   */
+  fun showLocalNotification(message: String, count: Int = 1) {
+    NotificationHelper.showLocalNotification(this, message, count)
+    portalViewModel.onBadgeUpdated(count)
+    portalViewModel.onVerificationDetected(count, "Verifikasi Pembayaran", message)
+  }
+
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     enableEdgeToEdge()
 
-    // Initialize the notification channel
+    // Inisialisasi Notification Channel sistem Android
     NotificationHelper.createNotificationChannel(this)
 
-    // Handle intent extras if opened from a notification
+    // Handle intent extras jika dibuka dari ketukan notifikasi
     handleNotificationIntent(intent)
 
     setContent {
       MyApplicationTheme {
         PortalScreen(
           viewModel = portalViewModel,
+          onShowLocalNotification = { msg, count ->
+            showLocalNotification(msg, count)
+          },
           modifier = Modifier.fillMaxSize()
         )
       }

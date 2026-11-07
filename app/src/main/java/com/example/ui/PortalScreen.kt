@@ -3,7 +3,10 @@ package com.example.ui
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.os.Build
+import android.provider.Settings
 import android.view.ViewGroup
 import android.webkit.WebSettings
 import android.webkit.WebView
@@ -14,7 +17,6 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -39,7 +41,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
@@ -79,6 +81,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.PermissionChecker
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -91,7 +94,7 @@ import com.example.viewmodel.VerificationEvent
 import com.example.webview.PortalScriptHelper
 import com.example.webview.PortalWebChromeClient
 import com.example.webview.PortalWebViewClient
-import com.example.webview.WebAppNotificationBridge
+import com.example.webview.WebAppInterface
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 
@@ -99,6 +102,7 @@ import kotlinx.coroutines.isActive
 @Composable
 fun PortalScreen(
   viewModel: PortalViewModel,
+  onShowLocalNotification: (message: String, count: Int) -> Unit,
   modifier: Modifier = Modifier
 ) {
   val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -117,7 +121,7 @@ fun PortalScreen(
     hasNotificationPermission = isGranted
   }
 
-  // Request notification permission once if needed on API 33+
+  // Request notification permission once at launch if needed
   LaunchedEffect(Unit) {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !hasNotificationPermission) {
       permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
@@ -133,15 +137,13 @@ fun PortalScreen(
     }
   }
 
-  // Periodic 10-second verification checker loop (coroutine level backup & guarantee)
+  // Periodic 10-second verification checker coroutine loop
   LaunchedEffect(webViewInstance) {
     val webView = webViewInstance ?: return@LaunchedEffect
     while (isActive) {
-      delay(10_000L) // Exactly 10 seconds interval
+      delay(10_000L) // 10 seconds interval
       webView.post {
-        webView.evaluateJavascript(PortalScriptHelper.getPeriodicCheckScript()) { _ ->
-          // Successfully evaluated periodic verification check
-        }
+        webView.evaluateJavascript(PortalScriptHelper.getPeriodicCheckScript()) { _ -> }
       }
       viewModel.recordCheckCycle()
     }
@@ -163,10 +165,8 @@ fun PortalScreen(
         },
         onBadgeClicked = { showDetailsSheet = true },
         onTestTriggerClicked = {
-          // Trigger test verification directly via JS interface
-          webViewInstance?.evaluateJavascript(
-            "if(window.AltalindoApp) { window.AltalindoApp.triggerVerification(1, 'Uji Verifikasi Masuk', 'Notifikasi verifikasi terdeteksi setiap 10 detik.'); } else if(window.AndroidNotificationBridge) { window.AndroidNotificationBridge.triggerTestVerification(); }"
-          ) { _ -> }
+          // Trigger the exact updateBadge logic directly
+          onShowLocalNotification("Ada 1 pembayaran menunggu verifikasi!", 1)
         }
       )
     }
@@ -176,13 +176,31 @@ fun PortalScreen(
         .fillMaxSize()
         .padding(innerPadding)
     ) {
-      // Direct Web Portal WebView
-      PortalWebView(
-        url = uiState.currentUrl,
-        viewModel = viewModel,
-        onWebViewReady = { webViewInstance = it },
-        modifier = Modifier.fillMaxSize()
-      )
+      Column(modifier = Modifier.fillMaxSize()) {
+        // Notification permission warning banner if permission is denied
+        if (!hasNotificationPermission) {
+          PermissionAlertBanner(
+            onRequestPermission = {
+              if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+              } else {
+                openAppNotificationSettings(context)
+              }
+            }
+          )
+        }
+
+        // Direct Web Portal WebView
+        PortalWebView(
+          url = uiState.currentUrl,
+          viewModel = viewModel,
+          onShowLocalNotification = onShowLocalNotification,
+          onWebViewReady = { webViewInstance = it },
+          modifier = Modifier
+            .weight(1f)
+            .fillMaxWidth()
+        )
+      }
 
       // Top progress bar during page load
       if (uiState.isLoading && uiState.progress < 100) {
@@ -208,7 +226,7 @@ fun PortalScreen(
           .padding(16.dp)
       ) {
         ErrorCard(
-          errorMessage = uiState.errorMessage ?: "Terjadi kesalahan.",
+          errorMessage = uiState.errorMessage ?: "Terjadi kesalahan koneksi.",
           onRetry = {
             viewModel.setError(null)
             webViewInstance?.reload()
@@ -228,11 +246,54 @@ fun PortalScreen(
         showDetailsSheet = false
       },
       onTestNotification = {
-        webViewInstance?.evaluateJavascript(
-          "if(window.AndroidNotificationBridge) { window.AndroidNotificationBridge.triggerTestVerification(); }"
-        ) { _ -> }
+        // Test notification, phone ring, and badge update
+        onShowLocalNotification("Ada 1 pembayaran menunggu verifikasi!", 1)
       }
     )
+  }
+}
+
+@Composable
+private fun PermissionAlertBanner(onRequestPermission: () -> Unit) {
+  Card(
+    colors = CardDefaults.cardColors(
+      containerColor = Color(0xFFFEF3C7) // Light amber
+    ),
+    shape = RoundedCornerShape(0.dp),
+    modifier = Modifier
+      .fillMaxWidth()
+      .testTag("permission_banner")
+  ) {
+    Row(
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(horizontal = 12.dp, vertical = 8.dp),
+      verticalAlignment = Alignment.CenterVertically
+    ) {
+      Icon(
+        imageVector = Icons.Default.Warning,
+        contentDescription = null,
+        tint = Color(0xFFB45309),
+        modifier = Modifier.size(18.dp)
+      )
+      Spacer(modifier = Modifier.width(8.dp))
+      Text(
+        text = "Izin notifikasi belum aktif. Aktifkan agar HP berdering saat ada verifikasi masuk.",
+        fontSize = 11.sp,
+        color = Color(0xFF78350F),
+        modifier = Modifier.weight(1f)
+      )
+      Spacer(modifier = Modifier.width(6.dp))
+      Button(
+        onClick = onRequestPermission,
+        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD97706)),
+        shape = RoundedCornerShape(6.dp),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+        modifier = Modifier.height(28.dp)
+      ) {
+        Text("Aktifkan", fontSize = 11.sp, color = Color.White)
+      }
+    }
   }
 }
 
@@ -259,7 +320,6 @@ private fun PortalTopAppBar(
             color = Color.White
           )
           Spacer(modifier = Modifier.width(8.dp))
-          // Live pulse indicator for 10-second check
           MonitoringPill(totalChecks = uiState.totalChecksPerformed)
         }
         Text(
@@ -311,6 +371,18 @@ private fun PortalTopAppBar(
         )
       }
 
+      // Quick Sound & Notification Test Trigger
+      IconButton(
+        onClick = onTestTriggerClicked,
+        modifier = Modifier.testTag("quick_sound_test_button")
+      ) {
+        Icon(
+          imageVector = Icons.Default.VolumeUp,
+          contentDescription = "Uji Suara & Notifikasi",
+          tint = GoldAmber
+        )
+      }
+
       // Notification Bell with Badge counter
       IconButton(
         onClick = onBadgeClicked,
@@ -340,7 +412,7 @@ private fun PortalTopAppBar(
               Icons.Default.Notifications
             },
             contentDescription = "Notifikasi Verifikasi",
-            tint = if (uiState.badgeCount > 0) GoldAmber else Color.White
+            tint = if (uiState.badgeCount > 0) NotificationBadgeRed else Color.White
           )
         }
       }
@@ -368,7 +440,7 @@ private fun MonitoringPill(totalChecks: Int) {
         modifier = Modifier
           .size(6.dp)
           .clip(CircleShape)
-          .background(Color(0xFF10B981)) // Green active dot
+          .background(Color(0xFF10B981))
       )
       Spacer(modifier = Modifier.width(4.dp))
       Text(
@@ -386,22 +458,21 @@ private fun MonitoringPill(totalChecks: Int) {
 private fun PortalWebView(
   url: String,
   viewModel: PortalViewModel,
+  onShowLocalNotification: (message: String, count: Int) -> Unit,
   onWebViewReady: (WebView) -> Unit,
   modifier: Modifier = Modifier
 ) {
   val context = LocalContext.current
 
-  val bridge = remember {
-    WebAppNotificationBridge(
+  // Exact WebAppInterface with bridge name "AndroidBridge" as requested by user
+  val webAppInterface = remember {
+    WebAppInterface(
       context = context,
-      onVerificationDetected = { count, title, msg ->
-        viewModel.onVerificationDetected(count, title, msg)
-      },
-      onBadgeUpdated = { count ->
+      onBadgeChanged = { count ->
         viewModel.onBadgeUpdated(count)
       },
-      onLogReceived = { log ->
-        // internal log handling
+      onVerificationReceived = { count, title, msg ->
+        viewModel.onVerificationDetected(count, title, msg)
       }
     )
   }
@@ -428,9 +499,10 @@ private fun PortalWebView(
           allowContentAccess = false
         }
 
-        // Add JavaScript interfaces (both primary and alias)
-        addJavascriptInterface(bridge, WebAppNotificationBridge.BRIDGE_NAME)
-        addJavascriptInterface(bridge, WebAppNotificationBridge.ALIAS_NAME)
+        // Register exact JavascriptInterface requested by the user:
+        // webView.addJavascriptInterface(WebAppInterface(this), "AndroidBridge")
+        addJavascriptInterface(webAppInterface, "AndroidBridge")
+        addJavascriptInterface(webAppInterface, "AndroidNotificationBridge")
 
         // Attach custom clients
         webViewClient = PortalWebViewClient(
@@ -548,7 +620,7 @@ private fun VerificationDetailsSheet(
           )
           Spacer(modifier = Modifier.width(8.dp))
           Text(
-            text = "Status Verifikasi Altalindo",
+            text = "Status Verifikasi & Notifikasi",
             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
           )
         }
@@ -586,7 +658,7 @@ private fun VerificationDetailsSheet(
           }
           Spacer(modifier = Modifier.height(6.dp))
           Text(
-            text = "Pemeriksaan terakhir: ${uiState.lastCheckTime} (Total ${uiState.totalChecksPerformed} siklus)",
+            text = "Pengecekan: ${uiState.lastCheckTime} (Total ${uiState.totalChecksPerformed} siklus)",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
           )
@@ -609,34 +681,32 @@ private fun VerificationDetailsSheet(
 
       Spacer(modifier = Modifier.height(16.dp))
 
-      // Action Buttons
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
+      // Test Notification Button with phone sound and vibration
+      Button(
+        onClick = onTestNotification,
+        colors = ButtonDefaults.buttonColors(containerColor = NavyPrimary),
+        shape = RoundedCornerShape(10.dp),
+        modifier = Modifier
+          .fillMaxWidth()
+          .testTag("test_verification_button")
       ) {
-        Button(
-          onClick = onTestNotification,
-          colors = ButtonDefaults.buttonColors(containerColor = NavyPrimary),
-          modifier = Modifier
-            .weight(1f)
-            .testTag("test_verification_button")
-        ) {
-          Icon(imageVector = Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(16.dp))
-          Spacer(modifier = Modifier.width(6.dp))
-          Text("Uji Notifikasi", fontSize = 13.sp)
-        }
+        Icon(imageVector = Icons.Default.VolumeUp, contentDescription = null, modifier = Modifier.size(18.dp))
+        Spacer(modifier = Modifier.width(8.dp))
+        Text("Uji Suara & Notifikasi (Ada 1 Pembayaran)", fontSize = 14.sp)
+      }
 
-        if (uiState.badgeCount > 0) {
-          OutlinedButton(
-            onClick = onClearBadge,
-            modifier = Modifier
-              .weight(1f)
-              .testTag("clear_badge_button")
-          ) {
-            Icon(imageVector = Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(16.dp))
-            Spacer(modifier = Modifier.width(6.dp))
-            Text("Tandai Selesai", fontSize = 13.sp)
-          }
+      if (uiState.badgeCount > 0) {
+        Spacer(modifier = Modifier.height(8.dp))
+        OutlinedButton(
+          onClick = onClearBadge,
+          shape = RoundedCornerShape(10.dp),
+          modifier = Modifier
+            .fillMaxWidth()
+            .testTag("clear_badge_button")
+        ) {
+          Icon(imageVector = Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(18.dp))
+          Spacer(modifier = Modifier.width(8.dp))
+          Text("Reset Badge Angka Menjadi 0", fontSize = 14.sp)
         }
       }
 
@@ -655,7 +725,7 @@ private fun VerificationDetailsSheet(
         Box(
           modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 24.dp),
+            .padding(vertical = 20.dp),
           contentAlignment = Alignment.Center
         ) {
           Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -663,16 +733,16 @@ private fun VerificationDetailsSheet(
               imageVector = Icons.Default.Info,
               contentDescription = null,
               tint = MaterialTheme.colorScheme.outline,
-              modifier = Modifier.size(36.dp)
+              modifier = Modifier.size(32.dp)
             )
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(6.dp))
             Text(
               text = "Belum ada verifikasi masuk terdeteksi.",
               style = MaterialTheme.typography.bodySmall,
               color = MaterialTheme.colorScheme.outline
             )
             Text(
-              text = "Gunakan tombol 'Uji Notifikasi' di atas untuk mencoba.",
+              text = "Klik tombol 'Uji Suara & Notifikasi' di atas untuk mencoba.",
               style = MaterialTheme.typography.labelSmall,
               color = MaterialTheme.colorScheme.outline
             )
@@ -682,7 +752,7 @@ private fun VerificationDetailsSheet(
         LazyColumn(
           modifier = Modifier
             .fillMaxWidth()
-            .height(220.dp),
+            .height(200.dp),
           verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
           items(uiState.verificationHistory, key = { it.id }) { item ->
@@ -691,7 +761,7 @@ private fun VerificationDetailsSheet(
         }
       }
 
-      Spacer(modifier = Modifier.height(20.dp))
+      Spacer(modifier = Modifier.height(16.dp))
     }
   }
 }
@@ -757,6 +827,9 @@ private fun VerificationHistoryItem(item: VerificationEvent) {
 }
 
 private fun checkNotificationPermission(context: Context): Boolean {
+  val areEnabled = NotificationManagerCompat.from(context).areNotificationsEnabled()
+  if (!areEnabled) return false
+
   return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
     ContextCompat.checkSelfPermission(
       context,
@@ -765,4 +838,20 @@ private fun checkNotificationPermission(context: Context): Boolean {
   } else {
     true
   }
+}
+
+private fun openAppNotificationSettings(context: Context) {
+  try {
+    val intent = Intent().apply {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        action = Settings.ACTION_APP_NOTIFICATION_SETTINGS
+        putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+      } else {
+        action = Settings.ACTION_APPLICATION_DETAILS_SETTINGS
+        data = Uri.fromParts("package", context.packageName, null)
+      }
+      flags = Intent.FLAG_ACTIVITY_NEW_TASK
+    }
+    context.startActivity(intent)
+  } catch (_: Exception) {}
 }
